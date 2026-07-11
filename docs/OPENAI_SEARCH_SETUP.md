@@ -12,8 +12,10 @@ HalalVoyage uses the OpenAI Responses API with the hosted `web_search` tool from
 
 ## Runtime behavior
 
-The app sends the visitor's city or food query to OpenAI from the server. OpenAI searches the live web, prioritizes halal-focused sources such as JAKIM, HalalTrip, eHalal, Zabihah, official restaurant pages, and strong travel/food sources, then returns normalized restaurant cards.
+The app sends the visitor's city or food query to OpenAI from the server. OpenAI searches the live web, prioritizes halal-focused sources such as MyEHalal/JAKIM, Loka halal food pages, HalalTrip, eHalal, Zabihah, official restaurant pages, and strong travel/food sources, then returns normalized restaurant cards.
 
 The UI shows the results as HalalVoyage cards. Each live-search result links to a verification page so users can check the latest details before visiting.
 
 Results are cached in memory for 12 hours per search query to improve speed and reduce API usage.
+
+For Kuala Lumpur, the route also keeps a curated fallback set of common halal-friendly options so the search page does not go blank if a live model response is delayed or malformed.
