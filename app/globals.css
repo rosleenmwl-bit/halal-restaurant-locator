@@ -44,14 +44,6 @@ nav { max-width: 1180px; margin: auto; padding: 28px 24px; display: flex; justif
 .message { padding: 60px; text-align: center; border: 1px solid var(--line); background: white; }
 .error { color: #9e2f24; }
 
-.source-panel { margin-top: 54px; border: 1px solid var(--ink); background: #fff; padding: 28px; display: grid; grid-template-columns: .9fr 1.1fr; gap: 28px; box-shadow: 6px 6px 0 var(--ink); }
-.source-panel h2 { font: 34px Georgia, serif; margin: 8px 0 12px; }
-.source-panel p { line-height: 1.55; }
-.source-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.source-grid a { border: 1px solid var(--line); padding: 16px; background: var(--cream); display: grid; gap: 8px; }
-.source-grid a:hover { border-color: var(--ink); }
-.source-grid span { color: #52645f; line-height: 1.45; }
-
 footer { border-top: 1px solid var(--ink); padding: 38px max(24px, calc((100% - 1132px)/2)); display: flex; justify-content: space-between; gap: 20px; }
 .detail-page { min-height: 100vh; }
 .detail { max-width: 1180px; margin: 35px auto 80px; padding: 0 24px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 70px; align-items: center; }
@@ -68,7 +60,7 @@ dd { margin: 0; }
 .center-page .button { margin-top: 24px; }
 
 @media (max-width: 800px) {
-  .grid, .source-panel, .source-grid { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: 1fr; }
   .hero { min-height: auto; }
   .hero h1 { font-size: 56px; }
   .section-heading { align-items: start; flex-direction: column; }
