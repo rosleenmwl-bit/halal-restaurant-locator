@@ -1,0 +1,2 @@
+import { NextResponse } from "next/server";
+export async function POST(request: Request) { const data = await request.formData(); const secret = String(data.get("secret") || ""); if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) return NextResponse.redirect(new URL("/admin?error=1", request.url), 303); const response = NextResponse.redirect(new URL("/admin", request.url), 303); response.cookies.set("admin_session", secret, { httpOnly:true, secure:process.env.NODE_ENV === "production", sameSite:"lax", maxAge:28800, path:"/" }); return response; }
