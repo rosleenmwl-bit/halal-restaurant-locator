@@ -28,6 +28,10 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
       setSearchError(false);
       try {
         const response = await fetch(`/api/discover?q=${encodeURIComponent(cleanQuery)}`, { signal: controller.signal });
+        if (response.status === 503) {
+          setExternalResults([]);
+          return;
+        }
         if (!response.ok) throw new Error("Search failed");
         const payload = await response.json() as { results?: SearchResult[] };
         setExternalResults(payload.results ?? []);
@@ -71,7 +75,7 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
           </div>
           <p>{isSearching ? "Searching..." : `${displayed.length} ${displayed.length === 1 ? "place" : "places"}`}</p>
         </div>
-        {loadError && !hasQuery ? <div className="message error">Could not load restaurants. Please try again.</div> : searchError ? <div className="message error">Search is taking longer than expected. Please try again.</div> : isSearching ? <div className="message">Searching halal food options...</div> : displayed.length === 0 ? <div className="message">No halal food matches found yet. Try a nearby city or a broader search.</div> : (
+        {loadError && !hasQuery ? <div className="message error">Could not load restaurants. Please try again.</div> : searchError ? <div className="message error">Search is taking longer than expected. Please try again.</div> : isSearching ? <div className="message">Searching halal food options...</div> : displayed.length === 0 ? <div className="message">Live search is ready. Add the Google search credentials in Vercel to show broad halal results for any city.</div> : (
           <div className="grid">{displayed.map((restaurant) => <RestaurantCard key={restaurant.id} restaurant={restaurant} />)}</div>
         )}
       </section>
