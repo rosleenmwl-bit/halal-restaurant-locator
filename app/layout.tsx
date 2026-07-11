@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./admin.css";
 
 export const metadata: Metadata = {
-  title: "vibe-stack-supabase",
-  description: "Next.js + Supabase starter",
+  title: "Sajda - Halal Restaurant Locator",
+  description: "A personally curated guide to trusted halal and Muslim-friendly restaurants around the world.",
 };
 
 export default function RootLayout({
