@@ -161,7 +161,7 @@ function buildResult(city: string, name: string, dish: string, description: stri
     image_url: null,
     is_published: true,
     external_url: `https://www.google.com/search?q=${encodeURIComponent(`${name} ${city} halal JAKIM MyEHalal`)}`,
-    google_rating_text: null,
+    google_rating_text: "Google rating",
     location_name: city,
   };
 }
