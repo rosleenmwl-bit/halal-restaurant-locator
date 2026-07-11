@@ -13,7 +13,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
 
   return (
     <main className="admin-shell">
-      <nav><Link href="/" className="brand">Sajda</Link><Link href="/admin" className="admin-link">Back to owner area</Link></nav>
+      <nav><Link href="/" className="brand">HalalVoyage</Link><Link href="/admin" className="admin-link">Back to private dashboard</Link></nav>
       <div className="panel edit-panel"><p className="eyebrow">Edit listing</p><h1>{data.name}</h1><RestaurantForm restaurant={data} /></div>
     </main>
   );

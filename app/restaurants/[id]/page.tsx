@@ -8,7 +8,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const db = await createClient();
   const { data } = await db.from("restaurants").select("name,city,signature_dish").eq("id", id).single();
-  return data ? { title: `${data.name} - Sajda`, description: `Discover ${data.signature_dish || "halal dining"} in ${data.city}.` } : {};
+  return data ? { title: `${data.name} - HalalVoyage`, description: `Discover ${data.signature_dish || "halal dining"} in ${data.city}.` } : {};
 }
 
 export default async function RestaurantPage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +19,7 @@ export default async function RestaurantPage({ params }: { params: Promise<{ id:
 
   return (
     <main className="detail-page">
-      <nav><Link href="/" className="brand">Sajda</Link><Link href="/" className="admin-link">Back to directory</Link></nav>
+      <nav><Link href="/" className="brand">HalalVoyage</Link><Link href="/" className="admin-link">Back to directory</Link></nav>
       <article className="detail">
         <div className="detail-image">{r.image_url && <img src={r.image_url} alt={`${r.name} restaurant`} />}</div>
         <div className="detail-copy">

@@ -12,15 +12,15 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (!(await isAdmin())) {
     return (
       <main className="admin-shell login">
-        <Link href="/" className="brand">Sajda</Link>
+        <Link href="/" className="brand">HalalVoyage</Link>
         <div className="panel">
-          <p className="eyebrow">Owner area</p>
+          <p className="eyebrow">Private dashboard</p>
           <h1>Welcome back.</h1>
-          <p>Enter your private owner secret to manage the directory.</p>
+          <p>This page is for the site owner to add, edit, or remove restaurant listings. Enter the private owner secret configured for HalalVoyage.</p>
           {params.error && <p className="form-error">That secret was not correct.</p>}
           <form action="/api/admin/login" method="post">
             <label>Owner secret<input type="password" name="secret" required autoFocus /></label>
-            <button className="button">Open owner area</button>
+            <button className="button">Open private dashboard</button>
           </form>
         </div>
       </main>
@@ -32,9 +32,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   return (
     <main className="admin-shell">
-      <nav><Link href="/" className="brand">Sajda</Link><Link href="/" className="admin-link">View public directory</Link></nav>
+      <nav><Link href="/" className="brand">HalalVoyage</Link><Link href="/" className="admin-link">View public directory</Link></nav>
       <header className="admin-heading">
-        <p className="eyebrow">Owner area</p>
+        <p className="eyebrow">Private dashboard</p>
         <h1>Curate the guide</h1>
         <p>Add a trusted place or keep an existing listing accurate.</p>
         {params.success && <div className="success">Restaurant {params.success} successfully.</div>}

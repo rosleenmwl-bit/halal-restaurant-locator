@@ -3,7 +3,7 @@ import "./globals.css";
 import "./admin.css";
 
 export const metadata: Metadata = {
-  title: "Sajda - Halal Restaurant Locator",
+  title: "HalalVoyage - Halal Restaurant Locator",
   description: "A personally curated guide to trusted halal and Muslim-friendly restaurants around the world.",
 };
 
