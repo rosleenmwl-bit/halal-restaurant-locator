@@ -158,12 +158,16 @@ function buildResult(city: string, name: string, dish: string, description: stri
     phone: null,
     website: null,
     google_maps_url: null,
-    image_url: null,
+    image_url: buildFoodImageUrl(dish),
     is_published: true,
     external_url: `https://www.google.com/search?q=${encodeURIComponent(`${name} ${city} halal JAKIM MyEHalal`)}`,
-    google_rating_text: "Google rating",
+    google_rating_text: "Check rating",
     location_name: city,
   };
+}
+
+function buildFoodImageUrl(food: string) {
+  return `https://source.unsplash.com/600x420/?${encodeURIComponent(`${food},halal food`)}`;
 }
 
 function dedupe(results: MalaysiaFallbackResult[]) {

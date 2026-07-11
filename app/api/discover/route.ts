@@ -39,6 +39,7 @@ type ModelResult = {
   google_review_count?: number | null;
   google_rating_text?: string | null;
   location_name?: string | null;
+  image_url?: string | null;
 };
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
@@ -107,9 +108,9 @@ async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
           content: `Find halal food or Muslim-friendly restaurants for: ${query}.
 
 Return only valid JSON in this exact shape:
-{"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"google_rating":null,"google_review_count":null,"google_rating_text":"4.3 ★, 1,204 Google reviews or null","location_name":"Street, district, mall, or area name or null","description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
+{"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"google_rating":4.3,"google_review_count":null,"google_rating_text":"4.3 ★ or null","location_name":"Specific street, neighbourhood, mall, or area name or null","image_url":"Direct food image URL that matches the signature dish or null","description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
 
-Return 20 to 30 results when possible, especially for Malaysian cities. Every result must have a source_url. Use Google-visible ratings and review counts when available. Extract a useful local place label such as street, neighbourhood, mall, or district when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local Malaysian, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, nasi kandar, nasi lemak, dim sum, chains, and family restaurants when relevant.`,
+Return 20 to 30 results when possible, especially for Malaysian cities. Every result must have a source_url. Use Google-visible customer ratings when available, but do not include review counts in google_rating_text. Extract a useful local place label such as street, neighbourhood, mall, or district; do not repeat the city as the location_name unless no smaller location is available. Find a representative food image URL that matches the signature_dish when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local Malaysian, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, nasi kandar, nasi lemak, dim sum, chains, and family restaurants when relevant.`,
         },
       ],
     }),
@@ -156,20 +157,47 @@ function normalizeResult(result: ModelResult, query: string): DiscoveryResult | 
     average_rating: typeof result.average_rating === "number" ? result.average_rating : typeof result.google_rating === "number" ? result.google_rating : null,
     review_count: typeof result.review_count === "number" ? result.review_count : typeof result.google_review_count === "number" ? result.google_review_count : null,
     description: trimNullable(result.description, 170) || "Halal-friendly restaurant result found through live web search.",
-    image_url: null,
+    image_url: normalizeImageUrl(result.image_url) || buildFoodImageUrl(result.signature_dish || result.name),
     external_url: result.source_url,
     google_rating_text: normalizeRatingText(result),
-    location_name: trimNullable(result.location_name, 60),
+    location_name: normalizeLocationName(result.location_name, result.city || inferCity(query)),
   };
 }
 
 function normalizeRatingText(result: ModelResult) {
-  if (result.google_rating_text) return trimText(result.google_rating_text, 45);
+  const explicit = cleanNullable(result.google_rating_text);
+  if (explicit) return trimText(stripReviewCounts(explicit), 20);
   const rating = typeof result.google_rating === "number" ? result.google_rating : typeof result.average_rating === "number" ? result.average_rating : null;
-  const reviewCount = typeof result.google_review_count === "number" ? result.google_review_count : typeof result.review_count === "number" ? result.review_count : null;
   if (rating === null) return null;
-  const reviews = reviewCount && reviewCount > 0 ? `, ${reviewCount.toLocaleString()} Google reviews` : "";
-  return `${rating.toFixed(1)} ★${reviews}`;
+  return `${rating.toFixed(1)} ★`;
+}
+
+function stripReviewCounts(value: string) {
+  return value.replace(/,\s*[\d,]+\+?\s*Google reviews?/i, "").replace(/\s*Google reviews?/i, "").trim();
+}
+
+function normalizeLocationName(value: string | null | undefined, city: string) {
+  const cleaned = cleanNullable(value);
+  if (!cleaned) return null;
+  if (cleaned.toLowerCase() === city.toLowerCase()) return null;
+  return trimText(cleaned, 60);
+}
+
+function normalizeImageUrl(value: string | null | undefined) {
+  const cleaned = cleanNullable(value);
+  if (!cleaned || !/^https?:\/\//i.test(cleaned)) return null;
+  return trimText(cleaned, 350);
+}
+
+function cleanNullable(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || /^(null|undefined|n\/a|none|unknown)$/i.test(trimmed)) return null;
+  return trimmed;
+}
+
+function buildFoodImageUrl(food: string | null | undefined) {
+  return `https://source.unsplash.com/600x420/?${encodeURIComponent(`${food || "halal food"},food`)}`;
 }
 
 function normalizePrice(value: string | null | undefined) {

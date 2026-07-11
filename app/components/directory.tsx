@@ -68,8 +68,7 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
           <Link href="/admin" className="admin-link">Manage listings</Link>
         </nav>
         <div className="hero-inner">
-          <p className="eyebrow">A trusted table, wherever you travel</p>
-          <h1>Explore Halal Restaurants<br /><em>Discover Muslim-friendly restaurants</em></h1>
+          <h1><span>Explore Halal Restaurants</span><em>Discover Muslim-friendly restaurants</em></h1>
           <p className="lede">Search restaurant by city, country from fast food, local restaurants to fine dining, globally.</p>
           <label className="search">
             <span aria-hidden>Search</span>
@@ -95,10 +94,11 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
 }
 
 function RestaurantCard({ restaurant: r }: { restaurant: SearchResult }) {
-  const ratingLabel = getRatingLabel(r);
-  const locationLabel = r.location_name || r.address?.split(",")[0] || r.city || "Location";
+  const ratingLabel = getDisplayRatingLabel(r);
+  const locationLabel = getLocationLabel(r);
+  const imageUrl = r.image_url || getFoodImageUrl(r);
   const cardContent = <>
-    <div className="card-image">{r.image_url ? <img src={r.image_url} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}<span className={`badge ${r.halal_status}`}>{r.halal_status === "halal-certified" ? "Halal certified" : "Muslim friendly"}</span></div>
+    <div className="card-image">{imageUrl ? <img src={imageUrl} alt={r.signature_dish ? `${r.signature_dish} food` : `${r.name} food`} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}<span className={`badge ${r.halal_status}`}>{r.halal_status === "halal-certified" ? "Halal certified" : "Muslim friendly"}</span></div>
     <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">{r.signature_dish || "House speciality"}</p><div className="meta"><span>{ratingLabel}</span><span>{locationLabel}</span></div></div>
   </>;
 
@@ -120,4 +120,27 @@ function getRatingLabel(r: SearchResult) {
     return `${r.average_rating.toFixed(1)} ★${reviews}`;
   }
   return "Google rating";
+}
+function getDisplayRatingLabel(r: SearchResult) {
+  const ratingText = cleanLabel(r.google_rating_text)?.replace(/,\s*[\d,]+\+?\s*Google reviews?/i, "").replace(/\s*Google reviews?/i, "");
+  if (ratingText) return ratingText;
+  if (typeof r.average_rating === "number") return `${r.average_rating.toFixed(1)} ★`;
+  return "Check rating";
+}
+
+function getLocationLabel(r: SearchResult) {
+  const location = cleanLabel(r.location_name) || cleanLabel(r.address?.split(",")[0]) || cleanLabel(r.google_maps_url ? "Map location" : null);
+  return location || r.city || "Location";
+}
+
+function getFoodImageUrl(r: SearchResult) {
+  const terms = [r.signature_dish, r.name, "halal food"].filter(Boolean).join(",");
+  return `https://source.unsplash.com/600x420/?${encodeURIComponent(terms)}`;
+}
+
+function cleanLabel(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || /^(null|undefined|n\/a|none|unknown)$/i.test(trimmed)) return null;
+  return trimmed;
 }
