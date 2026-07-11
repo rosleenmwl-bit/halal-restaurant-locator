@@ -5,7 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { Restaurant } from "@/lib/types";
 import { malaysiaFallbackResults } from "@/lib/malaysia-fallback";
 
-type SearchResult = Restaurant & { external_url?: string };
+type SearchResult = Restaurant & {
+  external_url?: string;
+  google_rating_text?: string | null;
+  location_name?: string | null;
+};
 
 export default function Directory({ restaurants, loadError }: { restaurants: Restaurant[]; loadError: boolean }) {
   const [query, setQuery] = useState("");
@@ -65,8 +69,8 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
         </nav>
         <div className="hero-inner">
           <p className="eyebrow">A trusted table, wherever you travel</p>
-          <h1>Good food.<br /><em>Clear halal status.</em></h1>
-          <p className="lede">Search halal-friendly places by city, country, restaurant, or dish and get a broader discovery set beyond the saved directory.</p>
+          <h1>Explore Halal Restaurants<br /><em>Discover Muslim-friendly restaurants</em></h1>
+          <p className="lede">Search restaurant by city, country from fast food, local restaurants to fine dining, globally.</p>
           <label className="search">
             <span aria-hidden>Search</span>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search Kuala Lumpur, Dubai, London..." aria-label="Search by city, country, restaurant, or dish" />
@@ -91,9 +95,11 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
 }
 
 function RestaurantCard({ restaurant: r }: { restaurant: SearchResult }) {
+  const ratingLabel = getRatingLabel(r);
+  const locationLabel = r.location_name || r.address?.split(",")[0] || r.city || "Location";
   const cardContent = <>
     <div className="card-image">{r.image_url ? <img src={r.image_url} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}<span className={`badge ${r.halal_status}`}>{r.halal_status === "halal-certified" ? "Halal certified" : "Muslim friendly"}</span></div>
-    <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">Try the {r.signature_dish || "house speciality"}</p><div className="meta"><span>{r.external_url ? "Verify details" : `Rating ${r.average_rating ?? "New"}`}</span><span>{r.price_range || "Not priced"}</span></div></div>
+    <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">{r.signature_dish || "House speciality"}</p><div className="meta"><span>{ratingLabel}</span><span>{locationLabel}</span></div></div>
   </>;
 
   if (r.external_url) {
@@ -105,4 +111,13 @@ function RestaurantCard({ restaurant: r }: { restaurant: SearchResult }) {
 
 function getClientFallback(query: string) {
   return malaysiaFallbackResults(query);
+}
+
+function getRatingLabel(r: SearchResult) {
+  if (r.google_rating_text) return r.google_rating_text;
+  if (typeof r.average_rating === "number") {
+    const reviews = typeof r.review_count === "number" && r.review_count > 0 ? `, ${r.review_count.toLocaleString()} Google reviews` : "";
+    return `${r.average_rating.toFixed(1)} ★${reviews}`;
+  }
+  return "Google rating";
 }

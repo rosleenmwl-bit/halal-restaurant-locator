@@ -14,6 +14,8 @@ type DiscoveryResult = {
   description: string | null;
   image_url: string | null;
   external_url: string;
+  google_rating_text: string | null;
+  location_name: string | null;
 };
 
 type OpenAIResponse = {
@@ -33,6 +35,10 @@ type ModelResult = {
   review_count?: number | null;
   description?: string | null;
   source_url?: string;
+  google_rating?: number | null;
+  google_review_count?: number | null;
+  google_rating_text?: string | null;
+  location_name?: string | null;
 };
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
@@ -101,9 +107,9 @@ async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
           content: `Find halal food or Muslim-friendly restaurants for: ${query}.
 
 Return only valid JSON in this exact shape:
-{"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
+{"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"google_rating":null,"google_review_count":null,"google_rating_text":"4.3 ★, 1,204 Google reviews or null","location_name":"Street, district, mall, or area name or null","description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
 
-Return 20 to 30 results when possible, especially for Malaysian cities. Every result must have a source_url. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local Malaysian, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, nasi kandar, nasi lemak, dim sum, chains, and family restaurants when relevant.`,
+Return 20 to 30 results when possible, especially for Malaysian cities. Every result must have a source_url. Use Google-visible ratings and review counts when available. Extract a useful local place label such as street, neighbourhood, mall, or district when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local Malaysian, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, nasi kandar, nasi lemak, dim sum, chains, and family restaurants when relevant.`,
         },
       ],
     }),
@@ -147,12 +153,23 @@ function normalizeResult(result: ModelResult, query: string): DiscoveryResult | 
     halal_status: result.halal_status === "halal-certified" ? "halal-certified" : "muslim-friendly",
     signature_dish: trimNullable(result.signature_dish, 70),
     price_range: normalizePrice(result.price_range),
-    average_rating: typeof result.average_rating === "number" ? result.average_rating : null,
-    review_count: typeof result.review_count === "number" ? result.review_count : null,
+    average_rating: typeof result.average_rating === "number" ? result.average_rating : typeof result.google_rating === "number" ? result.google_rating : null,
+    review_count: typeof result.review_count === "number" ? result.review_count : typeof result.google_review_count === "number" ? result.google_review_count : null,
     description: trimNullable(result.description, 170) || "Halal-friendly restaurant result found through live web search.",
     image_url: null,
     external_url: result.source_url,
+    google_rating_text: normalizeRatingText(result),
+    location_name: trimNullable(result.location_name, 60),
   };
+}
+
+function normalizeRatingText(result: ModelResult) {
+  if (result.google_rating_text) return trimText(result.google_rating_text, 45);
+  const rating = typeof result.google_rating === "number" ? result.google_rating : typeof result.average_rating === "number" ? result.average_rating : null;
+  const reviewCount = typeof result.google_review_count === "number" ? result.google_review_count : typeof result.review_count === "number" ? result.review_count : null;
+  if (rating === null) return null;
+  const reviews = reviewCount && reviewCount > 0 ? `, ${reviewCount.toLocaleString()} Google reviews` : "";
+  return `${rating.toFixed(1)} ★${reviews}`;
 }
 
 function normalizePrice(value: string | null | undefined) {
