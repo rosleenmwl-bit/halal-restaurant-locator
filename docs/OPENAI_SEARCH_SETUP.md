@@ -18,4 +18,4 @@ The UI shows the results as HalalVoyage cards. Each live-search result links to 
 
 Results are cached in memory for 12 hours per search query to improve speed and reduce API usage.
 
-For Kuala Lumpur, the route also keeps a curated fallback set of common halal-friendly options so the search page does not go blank if a live model response is delayed or malformed.
+For Malaysian city searches, the route also keeps a broad fallback set of common halal-certified chains and city-specific halal-friendly options so the search page does not go blank if a live model response is delayed or malformed.
