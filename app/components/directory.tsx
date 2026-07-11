@@ -75,7 +75,7 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
           </div>
           <p>{isSearching ? "Searching..." : `${displayed.length} ${displayed.length === 1 ? "place" : "places"}`}</p>
         </div>
-        {loadError && !hasQuery ? <div className="message error">Could not load restaurants. Please try again.</div> : searchError ? <div className="message error">Search is taking longer than expected. Please try again.</div> : isSearching ? <div className="message">Searching halal food options...</div> : displayed.length === 0 ? <div className="message">Live search is ready. Add the Google search credentials in Vercel to show broad halal results for any city.</div> : (
+        {loadError && !hasQuery ? <div className="message error">Could not load restaurants. Please try again.</div> : searchError ? <div className="message error">Search is taking longer than expected. Please try again.</div> : isSearching ? <div className="message">Searching halal food options...</div> : displayed.length === 0 ? <div className="message">Live search is ready. Add the OpenAI API key in Vercel to show broad halal results for any city.</div> : (
           <div className="grid">{displayed.map((restaurant) => <RestaurantCard key={restaurant.id} restaurant={restaurant} />)}</div>
         )}
       </section>
@@ -87,7 +87,7 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
 function RestaurantCard({ restaurant: r }: { restaurant: SearchResult }) {
   const cardContent = <>
     <div className="card-image">{r.image_url ? <img src={r.image_url} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}<span className={`badge ${r.halal_status}`}>{r.halal_status === "halal-certified" ? "Halal certified" : "Muslim friendly"}</span></div>
-    <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">Try the {r.signature_dish || "house speciality"}</p><div className="meta"><span>Rating {r.average_rating ?? "New"}</span><span>{r.price_range || "Not priced"}</span></div></div>
+    <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">Try the {r.signature_dish || "house speciality"}</p><div className="meta"><span>{r.external_url ? "Verify details" : `Rating ${r.average_rating ?? "New"}`}</span><span>{r.price_range || "Not priced"}</span></div></div>
   </>;
 
   if (r.external_url) {

@@ -15,60 +15,27 @@ type DiscoveryResult = {
   external_url: string;
 };
 
-type GoogleSearchItem = {
-  title?: string;
-  link?: string;
-  snippet?: string;
-  pagemap?: {
-    cse_thumbnail?: Array<{ src?: string }>;
-    metatags?: Array<Record<string, string>>;
-  };
+type OpenAIResponse = {
+  output_text?: string;
+  output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+  error?: { message?: string };
 };
 
-type GoogleSearchResponse = {
-  items?: GoogleSearchItem[];
-  error?: { message?: string };
+type ModelResult = {
+  name?: string;
+  city?: string;
+  country?: string;
+  halal_status?: string;
+  signature_dish?: string | null;
+  price_range?: string | null;
+  average_rating?: number | null;
+  review_count?: number | null;
+  description?: string | null;
+  source_url?: string;
 };
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 const cache = new Map<string, { expiresAt: number; results: DiscoveryResult[] }>();
-
-const sourceQueries = [
-  (query: string) => `site:halal.gov.my ${query} halal restaurant`,
-  (query: string) => `site:halaltrip.com ${query} halal restaurant`,
-  (query: string) => `site:ehalal.io ${query} halal restaurant`,
-  (query: string) => `site:zabihah.com ${query} halal restaurant`,
-  (query: string) => `${query} halal restaurant certified Muslim friendly`,
-];
-
-const restaurantWords = [
-  "restaurant",
-  "cafe",
-  "food",
-  "dining",
-  "kitchen",
-  "halal",
-  "makan",
-  "nasi",
-  "biryani",
-  "grill",
-  "steak",
-  "seafood",
-  "dim sum",
-  "sushi",
-  "bakery",
-];
-
-const blockedWords = [
-  "hotel booking",
-  "flight",
-  "job",
-  "career",
-  "pdf",
-  "login",
-  "privacy policy",
-  "terms",
-];
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -83,20 +50,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ results: cached.results, cached: true });
   }
 
-  if (!process.env.GOOGLE_SEARCH_API_KEY || !process.env.GOOGLE_SEARCH_ENGINE_ID) {
+  if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       {
         results: [],
         needsConfiguration: true,
-        message: "Live search is ready but needs GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID.",
+        message: "Live search is ready but needs OPENAI_API_KEY.",
       },
       { status: 503 },
     );
   }
 
   try {
-    const batches = await Promise.all(sourceQueries.map((buildQuery) => googleSearch(buildQuery(query))));
-    const results = normalizeResults(batches.flat(), query).slice(0, 18);
+    const results = await searchWithOpenAI(query);
     cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, results });
     return NextResponse.json({ results, cached: false });
   } catch (error) {
@@ -107,125 +73,101 @@ export async function GET(request: Request) {
   }
 }
 
-async function googleSearch(query: string): Promise<GoogleSearchItem[]> {
-  const url = new URL("https://customsearch.googleapis.com/customsearch/v1");
-  url.searchParams.set("key", process.env.GOOGLE_SEARCH_API_KEY!);
-  url.searchParams.set("cx", process.env.GOOGLE_SEARCH_ENGINE_ID!);
-  url.searchParams.set("q", query);
-  url.searchParams.set("num", "10");
-  url.searchParams.set("safe", "active");
-  url.searchParams.set("hl", "en");
-  url.searchParams.set("gl", countryBoost(query));
+async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_SEARCH_MODEL || "gpt-4.1-mini",
+      tools: [{ type: "web_search" }],
+      tool_choice: "required",
+      input: [
+        {
+          role: "system",
+          content:
+            "You are HalalVoyage's live halal food discovery engine. Search the web and return practical halal or Muslim-friendly restaurant options. Prioritize official halal directories, JAKIM/halal.gov.my for Malaysia, HalalTrip, eHalal, Zabihah, restaurant official pages, and strong travel/food sources. Do not include hotels, generic articles without restaurant names, job pages, PDFs, or duplicate locations.",
+        },
+        {
+          role: "user",
+          content: `Find halal food or Muslim-friendly restaurants for: ${query}.
 
-  const response = await fetch(url, { next: { revalidate: 60 * 60 * 12 } });
-  const data = await response.json() as GoogleSearchResponse;
-  if (!response.ok) throw new Error(data.error?.message || "Google search request failed.");
-  return data.items ?? [];
+Return only valid JSON in this exact shape:
+{"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
+
+Return 8 to 18 results when possible. Every result must have a source_url. If the halal status is not official, use "muslim-friendly" and avoid overclaiming.`,
+        },
+      ],
+    }),
+  });
+
+  const data = (await response.json()) as OpenAIResponse;
+  if (!response.ok) throw new Error(data.error?.message || "OpenAI search request failed.");
+
+  return parseResults(extractText(data), query).slice(0, 18);
 }
 
-function normalizeResults(items: GoogleSearchItem[], query: string): DiscoveryResult[] {
+function extractText(data: OpenAIResponse) {
+  if (data.output_text) return data.output_text;
+  return (data.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .filter((content) => content.type === "output_text" && content.text)
+    .map((content) => content.text)
+    .join("\n");
+}
+
+function parseResults(text: string, query: string): DiscoveryResult[] {
+  const jsonText = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const parsed = JSON.parse(jsonText) as { results?: ModelResult[] };
   const seen = new Set<string>();
-  const cleaned = items
-    .filter((item) => item.title && item.link)
-    .filter((item) => looksUseful(item))
-    .map((item) => toDiscoveryResult(item, query))
+
+  return (parsed.results ?? [])
+    .map((result) => normalizeResult(result, query))
+    .filter((result): result is DiscoveryResult => Boolean(result))
     .filter((result) => {
       const key = `${result.name.toLowerCase()}|${result.external_url}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .sort((a, b) => scoreResult(b, query) - scoreResult(a, query));
-
-  return cleaned;
+    });
 }
 
-function looksUseful(item: GoogleSearchItem) {
-  const text = `${item.title || ""} ${item.snippet || ""} ${item.link || ""}`.toLowerCase();
-  if (blockedWords.some((word) => text.includes(word))) return false;
-  return restaurantWords.some((word) => text.includes(word));
-}
-
-function toDiscoveryResult(item: GoogleSearchItem, query: string): DiscoveryResult {
-  const name = cleanTitle(item.title || "Halal food result");
-  const location = inferLocation(query, item);
-  const description = trimText(item.snippet || "Halal-friendly food result found through live web discovery.", 170);
-  const image = item.pagemap?.cse_thumbnail?.[0]?.src || item.pagemap?.metatags?.[0]?.["og:image"] || null;
+function normalizeResult(result: ModelResult, query: string): DiscoveryResult | null {
+  if (!result.name || !result.source_url) return null;
 
   return {
-    id: `google-${hash(`${name}-${item.link}`)}`,
-    name,
-    city: location.city,
-    country: location.country,
-    halal_status: "muslim-friendly",
-    signature_dish: inferDish(description),
-    price_range: null,
-    average_rating: null,
-    review_count: null,
-    description,
-    image_url: image,
-    external_url: item.link!,
+    id: `openai-${hash(`${result.name}-${result.source_url}`)}`,
+    name: trimText(result.name, 70),
+    city: trimText(result.city || inferCity(query), 50),
+    country: trimText(result.country || "Search result", 50),
+    halal_status: result.halal_status === "halal-certified" ? "halal-certified" : "muslim-friendly",
+    signature_dish: trimNullable(result.signature_dish, 70),
+    price_range: normalizePrice(result.price_range),
+    average_rating: typeof result.average_rating === "number" ? result.average_rating : null,
+    review_count: typeof result.review_count === "number" ? result.review_count : null,
+    description: trimNullable(result.description, 170) || "Halal-friendly restaurant result found through live web search.",
+    image_url: null,
+    external_url: result.source_url,
   };
 }
 
-function cleanTitle(title: string) {
-  return trimText(title.replace(/\s[-|–].*$/u, "").replace(/\s+/g, " ").trim(), 70);
+function normalizePrice(value: string | null | undefined) {
+  if (value === "$" || value === "$$" || value === "$$$") return value;
+  return null;
 }
 
-function inferLocation(query: string, item: GoogleSearchItem) {
-  const text = `${query} ${item.title || ""} ${item.snippet || ""}`.toLowerCase();
-  if (text.includes("kuala lumpur") || text.includes("kl ")) return { city: "Kuala Lumpur", country: "Malaysia" };
-  if (text.includes("dubai")) return { city: "Dubai", country: "United Arab Emirates" };
-  if (text.includes("london")) return { city: "London", country: "United Kingdom" };
-  if (text.includes("singapore")) return { city: "Singapore", country: "Singapore" };
-  if (text.includes("tokyo")) return { city: "Tokyo", country: "Japan" };
-  if (text.includes("seoul")) return { city: "Seoul", country: "South Korea" };
-  if (text.includes("paris")) return { city: "Paris", country: "France" };
-  return { city: titleCase(query), country: "Search result" };
-}
-
-function inferDish(text: string) {
-  const lower = text.toLowerCase();
-  if (lower.includes("nasi lemak")) return "Nasi lemak";
-  if (lower.includes("nasi kandar")) return "Nasi kandar";
-  if (lower.includes("biryani")) return "Biryani";
-  if (lower.includes("dim sum")) return "Dim sum";
-  if (lower.includes("sushi")) return "Sushi";
-  if (lower.includes("grill")) return "Grilled dishes";
-  return "Halal-friendly food";
-}
-
-function scoreResult(result: DiscoveryResult, query: string) {
-  const text = `${result.name} ${result.city} ${result.country} ${result.description} ${result.external_url}`.toLowerCase();
-  let score = 0;
-  for (const word of query.toLowerCase().split(/\s+/)) if (text.includes(word)) score += 3;
-  if (text.includes("halal")) score += 6;
-  if (text.includes("restaurant")) score += 4;
-  if (text.includes("halal.gov.my")) score += 8;
-  if (text.includes("halaltrip.com")) score += 7;
-  if (text.includes("zabihah.com")) score += 7;
-  if (text.includes("ehalal.io")) score += 6;
-  return score;
-}
-
-function countryBoost(query: string) {
-  const lower = query.toLowerCase();
-  if (lower.includes("kuala lumpur") || lower.includes("malaysia")) return "my";
-  if (lower.includes("dubai")) return "ae";
-  if (lower.includes("london")) return "gb";
-  if (lower.includes("singapore")) return "sg";
-  if (lower.includes("tokyo")) return "jp";
-  if (lower.includes("seoul")) return "kr";
-  if (lower.includes("paris")) return "fr";
-  return "my";
+function trimNullable(value: string | null | undefined, max: number) {
+  return value ? trimText(value, max) : null;
 }
 
 function trimText(value: string, max: number) {
   return value.length > max ? `${value.slice(0, max - 1).trim()}...` : value;
 }
 
-function titleCase(value: string) {
-  return value.replace(/\w\S*/g, (word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`);
+function inferCity(query: string) {
+  return query.replace(/\w\S*/g, (word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`);
 }
 
 function hash(value: string) {
