@@ -81,8 +81,13 @@ export async function GET(request: Request) {
       cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, results: fallback });
       return NextResponse.json({ results: fallback, cached: false, fallback: true });
     }
+    console.error("Live restaurant search failed:", error);
     return NextResponse.json(
-      { results: [], message: error instanceof Error ? error.message : "Search failed." },
+      {
+        results: [],
+        searchFailed: true,
+        message: "Live search could not complete this search. Please try again.",
+      },
       { status: 200 },
     );
   }
@@ -90,7 +95,7 @@ export async function GET(request: Request) {
 
 async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
   const [preferredSearch, broadSearch] = await Promise.allSettled([
-    searchOpenAIScope(query, PREFERRED_SOURCE_DOMAINS),
+    searchOpenAIScope(query, true),
     searchOpenAIScope(query),
   ]);
 
@@ -98,17 +103,17 @@ async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
   const broadResults = broadSearch.status === "fulfilled" ? broadSearch.value : [];
 
   if (preferredSearch.status === "rejected" && broadSearch.status === "rejected") {
-    throw preferredSearch.reason instanceof Error
-      ? preferredSearch.reason
+    throw broadSearch.reason instanceof Error
+      ? broadSearch.reason
       : new Error("OpenAI search request failed.");
   }
 
   return mergeResults(preferredResults, broadResults, fallbackResults(query)).slice(0, 30);
 }
 
-async function searchOpenAIScope(query: string, allowedDomains?: string[]): Promise<DiscoveryResult[]> {
-  const preferredSourceInstruction = allowedDomains
-    ? "Search only HalalLens (halallens.no), HalalTrip (halaltrip.com), and Zabihah (zabihah.com). Use the most specific restaurant or search-result page from those directories as source_url. Return an empty results array when none of them has a relevant listing."
+async function searchOpenAIScope(query: string, preferredSourcesOnly = false): Promise<DiscoveryResult[]> {
+  const preferredSourceInstruction = preferredSourcesOnly
+    ? "Search specifically within HalalLens (halallens.no), HalalTrip (halaltrip.com), and Zabihah (zabihah.com), using site-specific searches when useful. Only return listings whose source_url is from one of those three domains. Use the most specific restaurant or search-result page as source_url. Return an empty results array when none of them has a relevant listing."
     : "Search the broader web. Prioritize official halal-certification portals, official restaurant pages, and strong halal travel or food directories. Do not duplicate the dedicated HalalLens, HalalTrip, and Zabihah search when other useful sources are available.";
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -121,8 +126,7 @@ async function searchOpenAIScope(query: string, allowedDomains?: string[]): Prom
       model: process.env.OPENAI_SEARCH_MODEL || "gpt-4.1-mini",
       tools: [{
         type: "web_search",
-        search_context_size: allowedDomains ? "high" : "medium",
-        ...(allowedDomains ? { filters: { allowed_domains: allowedDomains } } : {}),
+        search_context_size: preferredSourcesOnly ? "high" : "medium",
       }],
       tool_choice: "required",
       input: [
@@ -147,7 +151,17 @@ Return up to 30 results when possible. Every result must have a source_url from 
   const data = (await response.json()) as OpenAIResponse;
   if (!response.ok) throw new Error(data.error?.message || "OpenAI search request failed.");
 
-  return parseResults(extractText(data), query);
+  const results = parseResults(extractText(data), query);
+  return preferredSourcesOnly
+    ? results.filter((result) => isPreferredSource(result.external_url))
+    : results;
+}
+
+function isPreferredSource(value: string) {
+  const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+  return PREFERRED_SOURCE_DOMAINS.some(
+    (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+  );
 }
 
 function extractText(data: OpenAIResponse) {

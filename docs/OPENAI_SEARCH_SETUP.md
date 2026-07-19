@@ -14,10 +14,12 @@ HalalVoyage uses the OpenAI Responses API with the hosted `web_search` tool from
 
 The app sends the visitor's city or food query to OpenAI from the server. It runs two live searches in parallel:
 
-1. A dedicated, domain-filtered search across HalalLens (`halallens.no`), HalalTrip (`halaltrip.com`), and Zabihah (`zabihah.com`).
+1. A dedicated search that asks for HalalLens (`halallens.no`), HalalTrip (`halaltrip.com`), and Zabihah (`zabihah.com`) listings, then validates that returned source URLs belong to those domains.
 2. A broader web search that prioritizes halal-focused sources such as MyEHalal/JAKIM, Loka halal food pages, eHalal, official restaurant pages, and strong travel/food sources.
 
 The results are normalized, merged, and de-duplicated into restaurant cards. Matches from the three dedicated directories are ordered first, and each live result shows the source used for verification.
+
+The preferred-source search intentionally avoids the web tool's `filters.allowed_domains` parameter because the configured `gpt-4.1-mini` model rejects that parameter. Source validation after retrieval preserves compatibility while preventing unrelated URLs from entering the preferred-source group.
 
 The UI shows the results as HalalVoyage cards. Each live-search result links to a verification page so users can check the latest details before visiting.
 

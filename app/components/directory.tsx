@@ -12,11 +12,18 @@ type SearchResult = Restaurant & {
   location_name?: string | null;
 };
 
+type SearchPayload = {
+  results?: SearchResult[];
+  message?: string;
+  needsConfiguration?: boolean;
+  searchFailed?: boolean;
+};
+
 export default function Directory({ restaurants, loadError }: { restaurants: Restaurant[]; loadError: boolean }) {
   const [query, setQuery] = useState("");
   const [externalResults, setExternalResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState(false);
+  const [searchMessage, setSearchMessage] = useState<string | null>(null);
   const cleanQuery = query.trim();
   const hasQuery = cleanQuery.length > 0;
 
@@ -24,29 +31,40 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
     if (!hasQuery) {
       setExternalResults([]);
       setIsSearching(false);
-      setSearchError(false);
+      setSearchMessage(null);
       return;
     }
 
     const controller = new AbortController();
     setIsSearching(true);
-    setSearchError(false);
+    setSearchMessage(null);
     const timer = window.setTimeout(async () => {
       try {
         const response = await fetch(`/api/discover?q=${encodeURIComponent(cleanQuery)}`, { signal: controller.signal });
+        const payload = await response.json() as SearchPayload;
+        const fallback = getClientFallback(cleanQuery);
         if (response.status === 503) {
-          setExternalResults(getClientFallback(cleanQuery));
+          setExternalResults(fallback);
+          if (fallback.length === 0) {
+            setSearchMessage(payload.needsConfiguration
+              ? "Live search needs its server configuration. Please contact the site owner."
+              : "Live search is temporarily unavailable. Please try again.");
+          }
           return;
         }
         if (!response.ok) throw new Error("Search failed");
-        const payload = await response.json() as { results?: SearchResult[] };
         const results = payload.results ?? [];
-        setExternalResults(results.length > 0 ? results : getClientFallback(cleanQuery));
+        setExternalResults(results.length > 0 ? results : fallback);
+        if (results.length === 0 && fallback.length === 0 && payload.searchFailed) {
+          setSearchMessage(payload.message || "Live search could not complete this search. Please try again.");
+        }
       } catch (error) {
         if (!controller.signal.aborted) {
           const fallback = getClientFallback(cleanQuery);
           setExternalResults(fallback);
-          setSearchError(fallback.length === 0);
+          if (fallback.length === 0) {
+            setSearchMessage("Live search is temporarily unavailable. Please try again.");
+          }
         }
       } finally {
         if (!controller.signal.aborted) setIsSearching(false);
@@ -86,7 +104,7 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
           </div>
           <p>{isSearching ? "Searching..." : `${displayed.length} ${displayed.length === 1 ? "place" : "places"}`}</p>
         </div>
-        {loadError && !hasQuery ? <div className="message error">Could not load restaurants. Please try again.</div> : searchError ? <div className="message error">Search is taking longer than expected. Please try again.</div> : isSearching ? <div className="message">Searching halal food options...</div> : displayed.length === 0 ? <div className="message">Live search is ready. Add the OpenAI API key in Vercel to show broad halal results for any city.</div> : (
+        {loadError && !hasQuery ? <div className="message error">Could not load restaurants. Please try again.</div> : searchMessage ? <div className="message error">{searchMessage}</div> : isSearching ? <div className="message">Searching halal food options...</div> : displayed.length === 0 ? <div className="message">No restaurants found — try a nearby city or different spelling.</div> : (
           <div className="grid">{displayed.map((restaurant) => <RestaurantCard key={restaurant.id} restaurant={restaurant} />)}</div>
         )}
       </section>
