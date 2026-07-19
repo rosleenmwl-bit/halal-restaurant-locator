@@ -44,8 +44,10 @@ type ModelResult = {
 };
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
+const MIN_RESULTS_BEFORE_EXPANSION = 8;
 const cache = new Map<string, { expiresAt: number; results: DiscoveryResult[] }>();
 const PREFERRED_SOURCE_DOMAINS = ["halallens.no", "halaltrip.com", "zabihah.com"];
+type SearchScope = "preferred" | "broad" | "expanded";
 const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] };
 const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
 const RESTAURANT_RESULTS_SCHEMA = {
@@ -145,26 +147,41 @@ export async function GET(request: Request) {
 
 async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
   const [preferredSearch, broadSearch] = await Promise.allSettled([
-    searchOpenAIScope(query, true),
+    searchOpenAIScope(query, "preferred"),
     searchOpenAIScope(query),
   ]);
 
   const preferredResults = preferredSearch.status === "fulfilled" ? preferredSearch.value : [];
   const broadResults = broadSearch.status === "fulfilled" ? broadSearch.value : [];
+  let results = mergeResults(preferredResults, broadResults, fallbackResults(query));
 
-  if (preferredSearch.status === "rejected" && broadSearch.status === "rejected") {
+  if (results.length < MIN_RESULTS_BEFORE_EXPANSION) {
+    try {
+      const expandedResults = await searchOpenAIScope(query, "expanded");
+      results = mergeResults(results, expandedResults);
+    } catch (error) {
+      if (preferredSearch.status === "rejected" && broadSearch.status === "rejected") {
+        throw error;
+      }
+      console.warn(`Expanded restaurant search failed for ${query}:`, error);
+    }
+  }
+
+  if (results.length === 0 && preferredSearch.status === "rejected" && broadSearch.status === "rejected") {
     throw broadSearch.reason instanceof Error
       ? broadSearch.reason
       : new Error("OpenAI search request failed.");
   }
 
-  return mergeResults(preferredResults, broadResults, fallbackResults(query)).slice(0, 30);
+  return results.slice(0, 30);
 }
 
-async function searchOpenAIScope(query: string, preferredSourcesOnly = false): Promise<DiscoveryResult[]> {
-  const preferredSourceInstruction = preferredSourcesOnly
+async function searchOpenAIScope(query: string, scope: SearchScope = "broad"): Promise<DiscoveryResult[]> {
+  const sourceInstruction = scope === "preferred"
     ? "Search specifically within HalalLens (halallens.no), HalalTrip (halaltrip.com), and Zabihah (zabihah.com), using site-specific searches when useful. Only return listings whose source_url is from one of those three domains. Use the most specific restaurant or search-result page as source_url. Return an empty results array when none of them has a relevant listing."
-    : "Search the broader web. Prioritize official halal-certification portals, official restaurant pages, and strong halal travel or food directories. Do not duplicate the dedicated HalalLens, HalalTrip, and Zabihah search when other useful sources are available.";
+    : scope === "expanded"
+      ? "Run an expanded recovery search because earlier searches may have found too few venues. Use several query variations: the city plus halal restaurant, Muslim-owned restaurant, halal certification, neighbourhood names, and the equivalent terms in the country's main local language or languages. Search official halal authorities and tourism sites, restaurant websites, local food guides, HalalLens, HalalTrip, and Zabihah. Return distinct named restaurants with evidence; never pad the list with generic articles or unverified venues."
+      : "Search the broader web. Prioritize official halal-certification portals, official restaurant pages, and strong halal travel or food directories. Do not duplicate the dedicated HalalLens, HalalTrip, and Zabihah search when other useful sources are available.";
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -177,7 +194,7 @@ async function searchOpenAIScope(query: string, preferredSourcesOnly = false): P
       max_output_tokens: 12000,
       tools: [{
         type: "web_search",
-        search_context_size: preferredSourcesOnly ? "high" : "medium",
+        search_context_size: scope === "broad" ? "medium" : "high",
       }],
       tool_choice: "required",
       text: {
@@ -193,7 +210,7 @@ async function searchOpenAIScope(query: string, preferredSourcesOnly = false): P
         {
           role: "system",
           content:
-            `You are HalalVoyage's live halal food discovery engine. Search the web and return practical halal or Muslim-friendly restaurant options. ${preferredSourceInstruction} For Malaysian cities, search with terms such as halal restaurant, JAKIM, sijil halal, restoran halal, and makanan halal. Do not include hotels, generic articles without restaurant names, job pages, PDFs, or duplicate locations.`,
+            `You are HalalVoyage's live halal food discovery engine. Search the web and return practical halal or Muslim-friendly restaurant options. ${sourceInstruction} For Malaysian cities, search with terms such as halal restaurant, JAKIM, sijil halal, restoran halal, and makanan halal. Do not include hotels, generic articles without restaurant names, job pages, PDFs, or duplicate locations.`,
         },
         {
           role: "user",
@@ -212,7 +229,7 @@ Return up to 20 results when possible. Every result must have a source_url from 
   if (!response.ok) throw new Error(data.error?.message || "OpenAI search request failed.");
 
   const results = parseResults(extractText(data), query);
-  return preferredSourcesOnly
+  return scope === "preferred"
     ? results.filter((result) => isPreferredSource(result.external_url))
     : results;
 }
