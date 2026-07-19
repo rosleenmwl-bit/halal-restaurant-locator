@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { malaysiaFallbackResults } from "@/lib/malaysia-fallback";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type DiscoveryResult = {
   id: string;
@@ -43,8 +45,12 @@ type ModelResult = {
   image_url?: string | null;
 };
 
-const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
+const MEMORY_CACHE_TTL_MS = 1000 * 60 * 60 * 12;
+const DURABLE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const MIN_RESULTS_BEFORE_EXPANSION = 8;
+const REQUEST_LIMIT = 60;
+const LIVE_SEARCH_LIMIT = 10;
+const LIVE_SEARCH_WINDOW_SECONDS = 60 * 10;
 const cache = new Map<string, { expiresAt: number; results: DiscoveryResult[] }>();
 const PREFERRED_SOURCE_DOMAINS = ["halallens.no", "halaltrip.com", "zabihah.com"];
 type SearchScope = "preferred" | "broad" | "expanded";
@@ -123,14 +129,86 @@ export async function GET(request: Request) {
     );
   }
 
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    return NextResponse.json(
+      {
+        results: [],
+        needsConfiguration: true,
+        message: "Secure search caching is not configured.",
+      },
+      { status: 503 },
+    );
+  }
+
+  const db = createAdminClient();
+  let visitorHash: string;
+
+  try {
+    visitorHash = getVisitorHash(request);
+    const requestLimit = await consumeRateLimit(db, visitorHash, "request", REQUEST_LIMIT);
+    if (!requestLimit.allowed) {
+      return rateLimitResponse(requestLimit.retryAfterSeconds);
+    }
+  } catch (error) {
+    console.error("Restaurant request rate-limit check failed:", error);
+    return NextResponse.json(
+      {
+        results: [],
+        searchFailed: true,
+        message: "Live search is temporarily unavailable. Please try again.",
+      },
+      { status: 503 },
+    );
+  }
+
+  try {
+    const durableCached = await getDurableCache(db, cacheKey);
+    if (durableCached) {
+      cache.set(cacheKey, {
+        expiresAt: Math.min(durableCached.expiresAt, Date.now() + MEMORY_CACHE_TTL_MS),
+        results: durableCached.results,
+      });
+      return NextResponse.json({ results: durableCached.results, cached: true });
+    }
+  } catch (error) {
+    console.error("Durable restaurant cache read failed:", error);
+  }
+
+  try {
+    const limit = await consumeRateLimit(db, visitorHash, "live", LIVE_SEARCH_LIMIT);
+    if (!limit.allowed) {
+      return rateLimitResponse(limit.retryAfterSeconds);
+    }
+  } catch (error) {
+    console.error("Restaurant search rate-limit check failed:", error);
+    return NextResponse.json(
+      {
+        results: [],
+        searchFailed: true,
+        message: "Live search is temporarily unavailable. Please try again.",
+      },
+      { status: 503 },
+    );
+  }
+
   try {
     const results = await searchWithOpenAI(query);
-    cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, results });
+    cache.set(cacheKey, { expiresAt: Date.now() + MEMORY_CACHE_TTL_MS, results });
+    try {
+      await saveDurableCache(db, cacheKey, query, results);
+    } catch (error) {
+      console.error("Durable restaurant cache save failed:", error);
+    }
     return NextResponse.json({ results, cached: false });
   } catch (error) {
     const fallback = fallbackResults(query);
     if (fallback.length > 0) {
-      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, results: fallback });
+      cache.set(cacheKey, { expiresAt: Date.now() + MEMORY_CACHE_TTL_MS, results: fallback });
+      try {
+        await saveDurableCache(db, cacheKey, query, fallback);
+      } catch (cacheError) {
+        console.error("Durable fallback cache save failed:", cacheError);
+      }
       return NextResponse.json({ results: fallback, cached: false, fallback: true });
     }
     console.error("Live restaurant search failed:", error);
@@ -143,6 +221,93 @@ export async function GET(request: Request) {
       { status: 200 },
     );
   }
+}
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+async function getDurableCache(db: AdminClient, queryKey: string) {
+  const { data, error } = await db
+    .from("search_cache")
+    .select("results, expires_at")
+    .eq("query_key", queryKey)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data || !Array.isArray(data.results)) return null;
+
+  const expiresAt = new Date(data.expires_at).getTime();
+  if (!Number.isFinite(expiresAt)) return null;
+
+  return {
+    results: data.results as DiscoveryResult[],
+    expiresAt,
+  };
+}
+
+async function saveDurableCache(
+  db: AdminClient,
+  queryKey: string,
+  query: string,
+  results: DiscoveryResult[],
+) {
+  const now = new Date();
+  const { error } = await db.from("search_cache").upsert({
+    query_key: queryKey,
+    query,
+    results,
+    updated_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + DURABLE_CACHE_TTL_MS).toISOString(),
+  }, { onConflict: "query_key" });
+
+  if (error) throw error;
+}
+
+async function consumeRateLimit(
+  db: AdminClient,
+  visitorHash: string,
+  limitKey: "request" | "live",
+  limit: number,
+) {
+  const { data, error } = await db.rpc("consume_search_rate_limit", {
+    p_visitor_hash: visitorHash,
+    p_limit_key: limitKey,
+    p_limit: limit,
+    p_window_seconds: LIVE_SEARCH_WINDOW_SECONDS,
+  });
+
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row.allowed !== "boolean") {
+    throw new Error("Rate-limit check returned an invalid response.");
+  }
+
+  return {
+    allowed: row.allowed as boolean,
+    retryAfterSeconds: Number(row.retry_after_seconds) || LIVE_SEARCH_WINDOW_SECONDS,
+  };
+}
+
+function rateLimitResponse(retryAfterSeconds: number) {
+  return NextResponse.json(
+    {
+      results: [],
+      rateLimited: true,
+      message: "You have reached the search limit. Please try again in a few minutes.",
+    },
+    {
+      status: 429,
+      headers: { "Retry-After": String(retryAfterSeconds) },
+    },
+  );
+}
+
+function getVisitorHash(request: Request) {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const address = forwarded || request.headers.get("x-real-ip") || "unknown";
+  const salt = process.env.RATE_LIMIT_SALT || process.env.ADMIN_SECRET;
+  if (!salt) throw new Error("RATE_LIMIT_SALT or ADMIN_SECRET is required.");
+  return createHash("sha256").update(`${salt}:${address}`).digest("hex");
 }
 
 async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {

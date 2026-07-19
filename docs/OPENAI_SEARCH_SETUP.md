@@ -2,13 +2,15 @@
 
 HalalVoyage uses the OpenAI Responses API with the hosted `web_search` tool from the server-side `/api/discover` route.
 
-## Required Vercel environment variable
+## Required Vercel environment variables
 
 - `OPENAI_API_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` - server-only database access for protected search caching and rate limiting.
 
 ## Optional Vercel environment variable
 
 - `OPENAI_SEARCH_MODEL` - defaults to `gpt-4.1-mini`.
+- `RATE_LIMIT_SALT` - hashes visitor network addresses before storage. When omitted, the existing `ADMIN_SECRET` is used.
 
 ## Runtime behavior
 
@@ -25,6 +27,8 @@ Both search passes use the Responses API's strict JSON Schema output format. Thi
 
 The UI shows the results as HalalVoyage cards. Each live-search result links to a verification page so users can check the latest details before visiting.
 
-Results are cached in memory for 12 hours per search query to improve speed and reduce API usage.
+Results are cached in memory for 12 hours and saved in the protected Supabase `search_cache` table for seven days. A repeated search can therefore return saved results across visitors and server restarts without another OpenAI call. Expired entries are refreshed and replaced so restaurant information does not remain stale indefinitely.
+
+Each visitor may make up to 60 total search requests and start up to 10 uncached live searches per 10-minute window. Cached searches do not count against the stricter live-search allowance. Visitor network addresses are salted and hashed before the rate counters are stored, and neither protection table is accessible through the public Supabase key.
 
 For Malaysian city searches, the route also keeps a broad fallback set of common halal-certified chains and city-specific halal-friendly options so the search page does not go blank if a live model response is delayed or malformed.

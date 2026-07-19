@@ -52,6 +52,13 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
           }
           return;
         }
+        if (response.status === 429) {
+          setExternalResults(fallback);
+          if (fallback.length === 0) {
+            setSearchMessage(payload.message || "You have reached the live-search limit. Please try again shortly.");
+          }
+          return;
+        }
         if (!response.ok) throw new Error("Search failed");
         const results = payload.results ?? [];
         setExternalResults(results.length > 0 ? results : fallback);
