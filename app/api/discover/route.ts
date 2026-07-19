@@ -115,7 +115,7 @@ export async function GET(request: Request) {
   const cacheKey = query.toLowerCase();
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    return NextResponse.json({ results: cached.results, cached: true });
+    return NextResponse.json({ results: cached.results, cached: true, cacheSource: "memory" });
   }
 
   if (!process.env.OPENAI_API_KEY) {
@@ -168,7 +168,11 @@ export async function GET(request: Request) {
         expiresAt: Math.min(durableCached.expiresAt, Date.now() + MEMORY_CACHE_TTL_MS),
         results: durableCached.results,
       });
-      return NextResponse.json({ results: durableCached.results, cached: true });
+      return NextResponse.json({
+        results: durableCached.results,
+        cached: true,
+        cacheSource: "database",
+      });
     }
   } catch (error) {
     console.error("Durable restaurant cache read failed:", error);
@@ -199,7 +203,7 @@ export async function GET(request: Request) {
     } catch (error) {
       console.error("Durable restaurant cache save failed:", error);
     }
-    return NextResponse.json({ results, cached: false });
+    return NextResponse.json({ results, cached: false, cacheSource: "live" });
   } catch (error) {
     const fallback = fallbackResults(query);
     if (fallback.length > 0) {
@@ -209,7 +213,12 @@ export async function GET(request: Request) {
       } catch (cacheError) {
         console.error("Durable fallback cache save failed:", cacheError);
       }
-      return NextResponse.json({ results: fallback, cached: false, fallback: true });
+      return NextResponse.json({
+        results: fallback,
+        cached: false,
+        cacheSource: "fallback",
+        fallback: true,
+      });
     }
     console.error("Live restaurant search failed:", error);
     return NextResponse.json(
