@@ -21,6 +21,8 @@ The results are normalized, merged, and de-duplicated into restaurant cards. Mat
 
 The preferred-source search intentionally avoids the web tool's `filters.allowed_domains` parameter because the configured `gpt-4.1-mini` model rejects that parameter. Source validation after retrieval preserves compatibility while preventing unrelated URLs from entering the preferred-source group.
 
+Both search passes use the Responses API's strict JSON Schema output format. This keeps larger city result sets valid and parseable instead of relying on the model to follow a JSON-only prompt perfectly.
+
 The UI shows the results as HalalVoyage cards. Each live-search result links to a verification page so users can check the latest details before visiting.
 
 Results are cached in memory for 12 hours per search query to improve speed and reduce API usage.

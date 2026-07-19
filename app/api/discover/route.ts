@@ -46,6 +46,56 @@ type ModelResult = {
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 const cache = new Map<string, { expiresAt: number; results: DiscoveryResult[] }>();
 const PREFERRED_SOURCE_DOMAINS = ["halallens.no", "halaltrip.com", "zabihah.com"];
+const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] };
+const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
+const RESTAURANT_RESULTS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          city: { type: "string" },
+          country: { type: "string" },
+          halal_status: { type: "string", enum: ["halal-certified", "muslim-friendly"] },
+          signature_dish: nullableString,
+          price_range: { anyOf: [{ type: "string", enum: ["$", "$$", "$$$"] }, { type: "null" }] },
+          average_rating: nullableNumber,
+          review_count: nullableNumber,
+          google_rating: nullableNumber,
+          google_review_count: nullableNumber,
+          google_rating_text: nullableString,
+          location_name: nullableString,
+          image_url: nullableString,
+          description: nullableString,
+          source_url: { type: "string" },
+        },
+        required: [
+          "name",
+          "city",
+          "country",
+          "halal_status",
+          "signature_dish",
+          "price_range",
+          "average_rating",
+          "review_count",
+          "google_rating",
+          "google_review_count",
+          "google_rating_text",
+          "location_name",
+          "image_url",
+          "description",
+          "source_url",
+        ],
+      },
+    },
+  },
+  required: ["results"],
+};
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -124,11 +174,21 @@ async function searchOpenAIScope(query: string, preferredSourcesOnly = false): P
     },
     body: JSON.stringify({
       model: process.env.OPENAI_SEARCH_MODEL || "gpt-4.1-mini",
+      max_output_tokens: 12000,
       tools: [{
         type: "web_search",
         search_context_size: preferredSourcesOnly ? "high" : "medium",
       }],
       tool_choice: "required",
+      text: {
+        format: {
+          type: "json_schema",
+          name: "halal_restaurant_results",
+          description: "A normalized list of halal or Muslim-friendly restaurant search results.",
+          strict: true,
+          schema: RESTAURANT_RESULTS_SCHEMA,
+        },
+      },
       input: [
         {
           role: "system",
@@ -142,7 +202,7 @@ async function searchOpenAIScope(query: string, preferredSourcesOnly = false): P
 Return only valid JSON in this exact shape:
 {"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"google_rating":4.3,"google_review_count":null,"google_rating_text":"4.3 ★ or null","location_name":"Specific street, neighbourhood, mall, or area name or null","image_url":"Direct food image URL that matches the signature dish or null","description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
 
-Return up to 30 results when possible. Every result must have a source_url from a page you actually used. Use Google-visible customer ratings when available, but do not include review counts in google_rating_text. Extract a useful local place label such as street, neighbourhood, mall, or district; do not repeat the city as the location_name unless no smaller location is available. Find a representative food image URL that matches the signature_dish when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, family restaurants, and relevant regional specialities.`,
+Return up to 20 results when possible. Every result must have a source_url from a page you actually used. Use Google-visible customer ratings when available, but do not include review counts in google_rating_text. Extract a useful local place label such as street, neighbourhood, mall, or district; do not repeat the city as the location_name unless no smaller location is available. Find a representative food image URL that matches the signature_dish when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, family restaurants, and relevant regional specialities.`,
         },
       ],
     }),
