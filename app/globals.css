@@ -29,6 +29,8 @@ nav { max-width: 1180px; margin: auto; padding: 28px 24px; display: flex; justif
 .search { margin-top: 35px; max-width: 720px; min-height: 64px; background: white; color: var(--ink); border: 1px solid var(--ink); display: flex; align-items: center; padding: 0 22px; gap: 14px; box-shadow: 6px 6px 0 var(--teal-dark); }
 .search span { font-size: 28px; }
 .search input { font: 17px Arial; border: 0; outline: 0; width: 100%; background: transparent; }
+.search-sources { margin: 18px 0 0; color: rgba(247, 242, 232, .82); font-size: 13px; }
+.search-sources a { color: var(--hero-text); border-bottom: 1px solid rgba(247, 242, 232, .6); font-weight: 700; }
 
 .directory { max-width: 1180px; margin: auto; padding: 80px 24px; }
 .section-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 36px; gap: 24px; }
@@ -47,6 +49,7 @@ nav { max-width: 1180px; margin: auto; padding: 28px 24px; display: flex; justif
 .dish { color: #52645f; }
 .meta { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; display: flex; justify-content: space-between; font-weight: 700; gap: 16px; }
 .meta span:last-child { text-align: right; }
+.source-label { margin-top: 14px; color: #61716c; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .message { padding: 60px; text-align: center; border: 1px solid var(--line); background: white; }
 .error { color: #9e2f24; }
 

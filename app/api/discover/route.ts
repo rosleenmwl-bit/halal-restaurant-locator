@@ -14,6 +14,7 @@ type DiscoveryResult = {
   description: string | null;
   image_url: string | null;
   external_url: string;
+  source_name: string;
   google_rating_text: string | null;
   location_name: string | null;
 };
@@ -44,6 +45,7 @@ type ModelResult = {
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 const cache = new Map<string, { expiresAt: number; results: DiscoveryResult[] }>();
+const PREFERRED_SOURCE_DOMAINS = ["halallens.no", "halaltrip.com", "zabihah.com"];
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -87,6 +89,28 @@ export async function GET(request: Request) {
 }
 
 async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
+  const [preferredSearch, broadSearch] = await Promise.allSettled([
+    searchOpenAIScope(query, PREFERRED_SOURCE_DOMAINS),
+    searchOpenAIScope(query),
+  ]);
+
+  const preferredResults = preferredSearch.status === "fulfilled" ? preferredSearch.value : [];
+  const broadResults = broadSearch.status === "fulfilled" ? broadSearch.value : [];
+
+  if (preferredSearch.status === "rejected" && broadSearch.status === "rejected") {
+    throw preferredSearch.reason instanceof Error
+      ? preferredSearch.reason
+      : new Error("OpenAI search request failed.");
+  }
+
+  return mergeResults(preferredResults, broadResults, fallbackResults(query)).slice(0, 30);
+}
+
+async function searchOpenAIScope(query: string, allowedDomains?: string[]): Promise<DiscoveryResult[]> {
+  const preferredSourceInstruction = allowedDomains
+    ? "Search only HalalLens (halallens.no), HalalTrip (halaltrip.com), and Zabihah (zabihah.com). Use the most specific restaurant or search-result page from those directories as source_url. Return an empty results array when none of them has a relevant listing."
+    : "Search the broader web. Prioritize official halal-certification portals, official restaurant pages, and strong halal travel or food directories. Do not duplicate the dedicated HalalLens, HalalTrip, and Zabihah search when other useful sources are available.";
+
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -95,13 +119,17 @@ async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
     },
     body: JSON.stringify({
       model: process.env.OPENAI_SEARCH_MODEL || "gpt-4.1-mini",
-      tools: [{ type: "web_search" }],
+      tools: [{
+        type: "web_search",
+        search_context_size: allowedDomains ? "high" : "medium",
+        ...(allowedDomains ? { filters: { allowed_domains: allowedDomains } } : {}),
+      }],
       tool_choice: "required",
       input: [
         {
           role: "system",
           content:
-            "You are HalalVoyage's live halal food discovery engine. Search the web and return practical halal or Muslim-friendly restaurant options. For any Malaysia city, prioritize MyEHalal/JAKIM portals including myehalal.halal.gov.my and halal.gov.my, then Loka halal food pages such as loka.my/kl/halalFood, HalalTrip, eHalal, Zabihah, official restaurant pages, and strong travel/food sources. Search by city plus terms like halal restaurant, JAKIM, sijil halal, restoran halal, and makanan halal. Do not include hotels, generic articles without restaurant names, job pages, PDFs, or duplicate locations.",
+            `You are HalalVoyage's live halal food discovery engine. Search the web and return practical halal or Muslim-friendly restaurant options. ${preferredSourceInstruction} For Malaysian cities, search with terms such as halal restaurant, JAKIM, sijil halal, restoran halal, and makanan halal. Do not include hotels, generic articles without restaurant names, job pages, PDFs, or duplicate locations.`,
         },
         {
           role: "user",
@@ -110,7 +138,7 @@ async function searchWithOpenAI(query: string): Promise<DiscoveryResult[]> {
 Return only valid JSON in this exact shape:
 {"results":[{"name":"Restaurant name","city":"City","country":"Country","halal_status":"halal-certified or muslim-friendly","signature_dish":"Dish or cuisine","price_range":"$, $$, $$$, or null","average_rating":null,"review_count":null,"google_rating":4.3,"google_review_count":null,"google_rating_text":"4.3 ★ or null","location_name":"Specific street, neighbourhood, mall, or area name or null","image_url":"Direct food image URL that matches the signature dish or null","description":"Short useful description under 170 characters","source_url":"Clickable URL used to verify this result"}]}
 
-Return 20 to 30 results when possible, especially for Malaysian cities. Every result must have a source_url. Use Google-visible customer ratings when available, but do not include review counts in google_rating_text. Extract a useful local place label such as street, neighbourhood, mall, or district; do not repeat the city as the location_name unless no smaller location is available. Find a representative food image URL that matches the signature_dish when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local Malaysian, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, nasi kandar, nasi lemak, dim sum, chains, and family restaurants when relevant.`,
+Return up to 30 results when possible. Every result must have a source_url from a page you actually used. Use Google-visible customer ratings when available, but do not include review counts in google_rating_text. Extract a useful local place label such as street, neighbourhood, mall, or district; do not repeat the city as the location_name unless no smaller location is available. Find a representative food image URL that matches the signature_dish when available. If the halal status is not official, use "muslim-friendly" and avoid overclaiming. Include a varied mix of local, Chinese-Muslim, Indian-Muslim, Middle Eastern, cafes, family restaurants, and relevant regional specialities.`,
         },
       ],
     }),
@@ -119,7 +147,7 @@ Return 20 to 30 results when possible, especially for Malaysian cities. Every re
   const data = (await response.json()) as OpenAIResponse;
   if (!response.ok) throw new Error(data.error?.message || "OpenAI search request failed.");
 
-  return mergeResults(parseResults(extractText(data), query), fallbackResults(query)).slice(0, 30);
+  return parseResults(extractText(data), query);
 }
 
 function extractText(data: OpenAIResponse) {
@@ -145,9 +173,11 @@ function parseResults(text: string, query: string): DiscoveryResult[] {
 
 function normalizeResult(result: ModelResult, query: string): DiscoveryResult | null {
   if (!result.name || !result.source_url) return null;
+  const externalUrl = normalizeExternalUrl(result.source_url);
+  if (!externalUrl) return null;
 
   return {
-    id: `openai-${hash(`${result.name}-${result.source_url}`)}`,
+    id: `openai-${hash(`${result.name}-${externalUrl}`)}`,
     name: trimText(result.name, 70),
     city: trimText(result.city || inferCity(query), 50),
     country: trimText(result.country || "Search result", 50),
@@ -158,10 +188,29 @@ function normalizeResult(result: ModelResult, query: string): DiscoveryResult | 
     review_count: typeof result.review_count === "number" ? result.review_count : typeof result.google_review_count === "number" ? result.google_review_count : null,
     description: trimNullable(result.description, 170) || "Halal-friendly restaurant result found through live web search.",
     image_url: normalizeImageUrl(result.image_url) || buildFoodImageUrl(result.signature_dish || result.name),
-    external_url: result.source_url,
+    external_url: externalUrl,
+    source_name: getSourceName(externalUrl),
     google_rating_text: normalizeRatingText(result),
     location_name: normalizeLocationName(result.location_name, result.city || inferCity(query)),
   };
+}
+
+function normalizeExternalUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function getSourceName(value: string) {
+  const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+  if (hostname === "halallens.no" || hostname.endsWith(".halallens.no")) return "HalalLens";
+  if (hostname === "halaltrip.com" || hostname.endsWith(".halaltrip.com")) return "HalalTrip";
+  if (hostname === "zabihah.com" || hostname.endsWith(".zabihah.com")) return "Zabihah";
+  if (hostname.includes("halal.gov.my")) return "JAKIM / MyEHalal";
+  return hostname;
 }
 
 function normalizeRatingText(result: ModelResult) {

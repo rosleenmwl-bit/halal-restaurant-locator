@@ -7,6 +7,7 @@ import { malaysiaFallbackResults } from "@/lib/malaysia-fallback";
 
 type SearchResult = Restaurant & {
   external_url?: string;
+  source_name?: string | null;
   google_rating_text?: string | null;
   location_name?: string | null;
 };
@@ -74,6 +75,7 @@ export default function Directory({ restaurants, loadError }: { restaurants: Res
             <span aria-hidden>Search</span>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search Kuala Lumpur, Dubai, London..." aria-label="Search by city, country, restaurant, or dish" />
           </label>
+          <p className="search-sources">Searching <a href="https://halallens.no/en/halal-restaurant" target="_blank" rel="noreferrer">HalalLens</a>, <a href="https://www.halaltrip.com/restaurant-search" target="_blank" rel="noreferrer">HalalTrip</a>, <a href="https://www.zabihah.com/" target="_blank" rel="noreferrer">Zabihah</a>, and the wider web.</p>
         </div>
       </header>
       <section className="directory">
@@ -99,7 +101,7 @@ function RestaurantCard({ restaurant: r }: { restaurant: SearchResult }) {
   const imageUrl = r.image_url || getFoodImageUrl(r);
   const cardContent = <>
     <div className="card-image">{imageUrl ? <img src={imageUrl} alt={r.signature_dish ? `${r.signature_dish} food` : `${r.name} food`} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}<span className={`badge ${r.halal_status}`}>{r.halal_status === "halal-certified" ? "Halal certified" : "Muslim friendly"}</span></div>
-    <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">{r.signature_dish || "House speciality"}</p><div className="meta"><span>{ratingLabel}</span><span>{locationLabel}</span></div></div>
+    <div className="card-body"><div className="location">{r.city}, {r.country}</div><h3>{r.name}</h3><p className="dish">{r.signature_dish || "House speciality"}</p><div className="meta"><span>{ratingLabel}</span><span>{locationLabel}</span></div>{r.external_url ? <div className="source-label">Source: {getSourceLabel(r)}</div> : null}</div>
   </>;
 
   if (r.external_url) {
@@ -107,6 +109,16 @@ function RestaurantCard({ restaurant: r }: { restaurant: SearchResult }) {
   }
 
   return <Link href={`/restaurants/${r.id}`} className="card">{cardContent}</Link>;
+}
+
+function getSourceLabel(r: SearchResult) {
+  if (cleanLabel(r.source_name)) return r.source_name;
+  if (!r.external_url) return "Live web search";
+  try {
+    return new URL(r.external_url).hostname.replace(/^www\./, "");
+  } catch {
+    return "Live web search";
+  }
 }
 
 function getClientFallback(query: string) {

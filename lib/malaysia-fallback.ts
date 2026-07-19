@@ -16,6 +16,7 @@ export type MalaysiaFallbackResult = {
   image_url: string | null;
   is_published: boolean;
   external_url: string;
+  source_name: string;
   google_rating_text: string | null;
   location_name: string | null;
 };
@@ -161,6 +162,7 @@ function buildResult(city: string, name: string, dish: string, description: stri
     image_url: buildFoodImageUrl(dish),
     is_published: true,
     external_url: `https://www.google.com/search?q=${encodeURIComponent(`${name} ${city} halal JAKIM MyEHalal`)}`,
+    source_name: "Google Search",
     google_rating_text: "Check rating",
     location_name: city,
   };
